@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Web Content Collector · Library</title>
+    <link rel="stylesheet" href="library.css" />
+  </head>
+  <body>
+    <header class="top">
+      <img src="../../icons/icon48.png" alt="" width="32" height="32" />
+      <h1>Web Content Collector</h1>
+      <nav>
+        <button class="tab active" data-tab="library">Library</button>
+        <button class="tab" data-tab="settings">Settings</button>
+        <button class="tab" data-tab="help">How to use</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="tab-library" class="panel">
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Search title, site or URL…" />
+          <label class="check"><input type="checkbox" id="selectAll" /> Select all</label>
+        </div>
+        <div class="toolbar actions">
+          <button id="exportMd" class="primary">Export Claude bundle (.zip of .md)</button>
+          <button id="exportDocx">Export study docs (.zip of .docx)</button>
+          <button id="exportCombined">Download one combined .md</button>
+          <button id="deleteSelected" class="danger">Delete selected</button>
+        </div>
+        <p id="libStatus" class="status" role="status" aria-live="polite"></p>
+        <table class="pages">
+          <thead>
+            <tr><th></th><th>Page</th><th>Words</th><th>Videos</th><th>Collected</th><th>Files</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <p id="empty" class="empty" hidden>No pages yet. Open any page, click the extension icon and choose <b>Collect this page</b> — or switch on auto-collect.</p>
+      </section>
+
+      <section id="tab-settings" class="panel" hidden>
+        <form id="settingsForm">
+          <fieldset>
+            <legend>Collecting</legend>
+            <label>Download folder (inside your Downloads folder) <input name="folder" type="text" /></label>
+            <label>Capture
+              <select name="scope">
+                <option value="main">Main content (skips menus, ads, footers)</option>
+                <option value="full">Entire page</option>
+              </select>
+            </label>
+            <label class="check"><input name="includeHidden" type="checkbox" /> Include hidden/collapsed content (tabs, accordions)</label>
+            <label class="check"><input name="docxImages" type="checkbox" /> Embed images in study documents</label>
+          </fieldset>
+          <fieldset>
+            <legend>Auto-collect</legend>
+            <label class="check"><input name="autoCollect" type="checkbox" /> Enable auto-collect</label>
+            <label>Which sites
+              <select name="autoScope">
+                <option value="allowlist">Only sites in the list below</option>
+                <option value="all">All sites (except the block list)</option>
+              </select>
+            </label>
+            <label>Auto-collect these sites (one domain per line; subdomains included)
+              <textarea name="allowlist" rows="4" placeholder="wikipedia.org&#10;developer.mozilla.org"></textarea>
+            </label>
+            <label>Never collect these sites
+              <textarea name="blocklist" rows="4"></textarea>
+            </label>
+            <div class="grid2">
+              <label>Wait after page load (seconds) <input name="autoDelaySec" type="number" min="0" max="60" /></label>
+              <label>Minimum words to save <input name="autoMinWords" type="number" min="0" /></label>
+            </div>
+            <label class="check"><input name="autoDownloadMd" type="checkbox" /> Also download a .md file for every auto-collected page</label>
+          </fieldset>
+          <fieldset>
+            <legend>Recreate-webpage kit</legend>
+            <label class="check"><input name="kit.includeScripts" type="checkbox" /> Download JavaScript files</label>
+            <label class="check"><input name="kit.screenshot" type="checkbox" /> Include a screenshot</label>
+            <label class="check"><input name="kit.autoScroll" type="checkbox" /> Scroll the page first to load lazy images</label>
+            <div class="grid2">
+              <label>Max assets <input name="kit.maxAssets" type="number" min="10" max="5000" /></label>
+              <label>Max total size (MB) <input name="kit.maxTotalMB" type="number" min="10" max="2000" /></label>
+            </div>
+          </fieldset>
+          <button type="submit" class="primary">Save settings</button>
+          <span id="saved" class="status"></span>
+        </form>
+      </section>
+
+      <section id="tab-help" class="panel help" hidden>
+        <h2>Outputs</h2>
+        <ul>
+          <li><b>Markdown (.md)</b> — YAML front matter (source URL, author, dates, word count), an outline, the cleaned content, then tables of embedded videos, images and links. Upload it to Claude or a Claude Project as-is.</li>
+          <li><b>Study document (.docx)</b> — cover page, overview, table of contents, learning objectives, the full content with images, key takeaways, key terms, video resources, review questions and space for notes. Opens in Word, Google Docs, LibreOffice and Pages.</li>
+          <li><b>Site kit (.zip)</b> — offline copy of the page with local CSS/images/fonts/scripts, original snapshot, screenshot, design tokens (colors, typography, spacing, breakpoints, CSS variables), section and layout maps, asset manifest, all video links and a <code>RECREATE.md</code> guide with a ready-made prompt for Claude.</li>
+        </ul>
+        <h2>Embedded videos</h2>
+        <p>Videos are detected from iframes, <code>&lt;video&gt;</code> tags, lazy-load placeholders (e.g. lite-youtube), Open Graph/Twitter tags and JSON-LD — YouTube, Vimeo, Loom, Wistia, Dailymotion, TikTok, Twitch, Bilibili, TED, Vidyard, Brightcove, Google Drive, direct video files and more. Every output lists both a watch URL and an embed URL.</p>
+        <h2>Shortcuts</h2>
+        <p><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> collect page · <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> site kit. Change them at <code>chrome://extensions/shortcuts</code>.</p>
+        <h2>Tips</h2>
+        <ul>
+          <li>To avoid a "Save as" prompt for every file, turn off <i>Ask where to save each file</i> in Chrome's download settings.</li>
+          <li>Use <b>Export Claude bundle</b> to hand Claude a whole research session at once: it includes an <code>index.md</code> catalog plus one file per page.</li>
+          <li>Everything stays on your computer; nothing is sent to any server.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script type="module" src="library.js"></script>
+  </body>
+</html>

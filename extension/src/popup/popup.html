@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Web Content Collector</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="../../icons/icon48.png" alt="" width="28" height="28" />
+      <div class="page">
+        <div id="pageTitle" class="title">…</div>
+        <div id="pageHost" class="host"></div>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>① Collect content</h2>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="outMd" /> Markdown <small>(.md for Claude)</small></label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="outDocx" /> Study document <small>(.docx)</small></label>
+      </div>
+      <div class="row">
+        <label for="scope">Capture</label>
+        <select id="scope">
+          <option value="main">Main content (recommended)</option>
+          <option value="full">Entire page</option>
+        </select>
+      </div>
+      <button id="collectBtn" class="primary">Collect this page</button>
+    </section>
+
+    <section class="card">
+      <h2>② Recreate the webpage</h2>
+      <p class="hint">Downloads a ZIP with an offline copy (HTML, CSS, images, fonts, scripts), a screenshot, design tokens, a layout map, all video links and a RECREATE.md guide.</p>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="kitScripts" /> Include scripts</label>
+        <label class="check"><input type="checkbox" id="kitScroll" /> Scroll to load lazy content</label>
+      </div>
+      <button id="kitBtn" class="secondary">Collect all elements (.zip)</button>
+    </section>
+
+    <section class="card">
+      <h2>Auto-collect</h2>
+      <label class="switch">
+        <input type="checkbox" id="autoToggle" />
+        <span>Automatically save pages I visit to the library</span>
+      </label>
+      <div id="autoOptions">
+        <div class="row">
+          <label class="check"><input type="radio" name="autoScope" value="allowlist" /> Only listed sites</label>
+          <label class="check"><input type="radio" name="autoScope" value="all" /> All sites</label>
+        </div>
+        <div class="row">
+          <button id="siteBtn" class="link"></button>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="autoMd" /> Also download a .md file for each page</label>
+        </div>
+      </div>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <footer>
+      <button id="libraryBtn" class="link">Open library &amp; settings (<span id="count">0</span>)</button>
+      <span class="keys">Alt+Shift+S · Alt+Shift+K</span>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
