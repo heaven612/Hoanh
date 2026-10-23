@@ -6,15 +6,15 @@ Collect the content of any webpage you're reading in an organized format:
 | --- | --- |
 | **Markdown (.md)** for Claude | YAML front matter (source URL, author, dates, word count…), outline, clean content (headings, lists, tables, code, quotes, images), and tables of **embedded videos**, images and links. |
 | **Study document (.docx)** | Cover page, overview, table of contents, learning objectives, full content with images, key takeaways, key terms, video resources, review questions, note space and references. |
-| **Site kit (.zip)** to recreate the page | Offline copy (`index.html`) with local CSS/images/fonts/scripts, raw snapshot, screenshot, design tokens (colors, typography, radii, shadows, breakpoints, CSS variables), section and layout maps, asset manifest, all video links and a `RECREATE.md` guide with a ready-made prompt for Claude. |
+| **Site kit (.zip)** to recreate the page | Offline copy (`index.html`) with local CSS/images/fonts/scripts (Shadow DOM included), raw snapshot, above-the-fold and **full-page** screenshots, design tokens (colors, typography, radii, shadows, breakpoints, CSS variables), section and layout maps, asset manifest, all video links and a `RECREATE.md` guide with a ready-made prompt for Claude. |
 
 **Embedded video links** are found in iframes, `<video>` tags, lazy-load placeholders (lite-youtube, `data-video-id`…), Open Graph/Twitter tags and JSON-LD, for YouTube, Vimeo, Loom, Wistia, Dailymotion, TikTok, Twitch, Bilibili, TED, Vidyard, Brightcove, Google Drive, Facebook, direct video files and more. Each video gets a watch URL and an embed URL.
 
 ## Install
 
-1. Download or clone this repository.
+1. Download `web-content-collector.zip` and unzip it (or clone this repository and use the `extension/` folder).
 2. Open `chrome://extensions`, turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select the `extension/` folder.
+3. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`).
 4. Pin the extension icon in the toolbar.
 
 ## Use
@@ -34,7 +34,8 @@ Everything runs locally in your browser. Nothing is sent to any server. Collecte
 
 - Chrome blocks extensions on `chrome://` pages, the Chrome Web Store and some built-in viewers.
 - Streaming players (e.g. a `<video>` fed by `blob:` URLs) don't expose their file URL; the page's own embed/watch URL is reported when available.
-- The site kit screenshot covers the visible viewport. Pages that are heavily built in JavaScript recreate best from `index.html` (static) together with `RECREATE.md`.
+- The full-page screenshot is stitched from up to 20 screen-heights; very long pages are cut off there. Pages heavily built in JavaScript recreate best from `index.html` (static) together with `RECREATE.md`.
+- Content hidden in closed tabs/accordions is skipped unless you enable *Include hidden/collapsed content* in Settings.
 - Only recreate or reuse sites you own or have permission to use.
 
 ## Project layout

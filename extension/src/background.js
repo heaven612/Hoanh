@@ -120,9 +120,10 @@ async function collectSiteKit(tabId, { jobId = `job${Date.now()}` } = {}) {
   progress(jobId, 'Capturing HTML, CSS, layout and design tokens…');
   const kit = await runInPage(tabId, 'extractSiteKit', { scope: settings.scope, includeHidden: settings.includeHidden });
 
-  if (settings.kit.screenshot) {
+  if (settings.kit.screenshot && tab.active) {
+    progress(jobId, 'Taking full-page screenshot…');
     try {
-      if (tab.active) kit.screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      kit.screenshots = await fullPageScreenshot(tabId, tab.windowId);
     } catch {
       /* screenshots are best-effort */
     }
@@ -146,6 +147,30 @@ async function collectSiteKit(tabId, { jobId = `job${Date.now()}` } = {}) {
   await download(res.url, filename);
   await badge(tabId, '✓', '#1a7f37');
   return { title: kit.content.title, stats: res.stats, bytes: res.bytes, files: [filename], videos: kit.content.stats.videos };
+}
+
+const MAX_SCREENSHOT_SLICES = 20;
+const CAPTURE_INTERVAL_MS = 600; // Chrome allows ~2 captureVisibleTab calls per second
+
+async function fullPageScreenshot(tabId, windowId) {
+  const plan = await runInPage(tabId, 'screenshotPlan');
+  const slices = [];
+  let lastCapture = 0;
+  try {
+    for (let i = 0, y = 0; i < MAX_SCREENSHOT_SLICES; i++, y += plan.height) {
+      const actualY = await runInPage(tabId, 'scrollToY', y);
+      if (i === 1) await runInPage(tabId, 'hideFixed', true);
+      const wait = lastCapture + CAPTURE_INTERVAL_MS - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      lastCapture = Date.now();
+      slices.push({ y: actualY, dataUrl: await chrome.tabs.captureVisibleTab(windowId, { format: 'png' }) });
+      if (actualY + plan.height >= plan.total || (i > 0 && actualY === slices[i - 1].y)) break;
+    }
+  } finally {
+    await runInPage(tabId, 'hideFixed', false).catch(() => {});
+    await runInPage(tabId, 'scrollToY', 0).catch(() => {});
+  }
+  return { ...plan, slices };
 }
 
 async function activeTabId() {

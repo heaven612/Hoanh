@@ -188,6 +188,26 @@ function rewriteSrcset(value, base, fetcher) {
 
 const json = (v) => JSON.stringify(v, null, 2);
 
+const dataUrlBytes = (dataUrl) => Uint8Array.from(atob(dataUrl.split(',')[1]), (c) => c.charCodeAt(0));
+
+const MAX_CANVAS_HEIGHT = 16000;
+
+async function stitch({ slices, height }) {
+  const bitmaps = await Promise.all(slices.map((s) => createImageBitmap(new Blob([dataUrlBytes(s.dataUrl)], { type: 'image/png' }))));
+  // Captured slices are in device pixels; derive the scale from the first one.
+  const ratio = bitmaps[0].height / height;
+  const last = slices[slices.length - 1];
+  const fullHeight = (last.y + height) * ratio;
+  const scale = Math.min(1, MAX_CANVAS_HEIGHT / fullHeight);
+  const canvas = new OffscreenCanvas(Math.round(bitmaps[0].width * scale), Math.round(fullHeight * scale));
+  const ctx = canvas.getContext('2d');
+  slices.forEach((s, i) => {
+    ctx.drawImage(bitmaps[i], 0, Math.round(s.y * ratio * scale), canvas.width, Math.round(bitmaps[i].height * scale));
+    bitmaps[i].close();
+  });
+  return new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+}
+
 function tokensMarkdown(t) {
   const list = (arr, fmt = (x) => `\`${x.value}\` ×${x.count}`) => (arr && arr.length ? arr.map(fmt).join(', ') : '_none detected_');
   const lines = [
@@ -237,7 +257,7 @@ function recreateGuide(kit, page, stats) {
 | \`index.html\` | Static, offline copy of the rendered page. Styles, images and fonts point to \`assets/\`; scripts removed so the snapshot renders exactly as captured. **Start here.** |
 | \`index-with-scripts.html\` | Same snapshot with the original scripts kept (localized). Interactive bits may work, or the framework may re-render. |
 | \`original-snapshot.html\` | Raw DOM as captured, all URLs still pointing at the live site. |
-| \`screenshot.png\` | Screenshot of the visible viewport at capture time${kit.screenshot ? '' : ' (not captured)'}. |
+| \`screenshot.png\`, \`screenshot-full.png\` | Above-the-fold screenshot and the full page stitched top to bottom${kit.screenshots ? '' : ' (not captured)'}. |
 | \`content.md\` | Clean text content of the page (Markdown) – use it for copy. |
 | \`assets/css\`, \`assets/img\`, \`assets/fonts\`, \`assets/js\` | Downloaded assets (${stats.ok} files, ${(stats.bytes / 1024 / 1024).toFixed(1)} MB; ${stats.failed} could not be fetched). |
 | \`data/design-tokens.json\` | Colors, typography, radii, shadows, breakpoints, CSS variables. |
@@ -425,10 +445,17 @@ export async function buildSiteKit(kit, { includeScripts = true, maxAssets = 600
   onProgress('Writing design data and guides…');
   const page = kit.content;
   zip.add(`${root}content.md`, renderMarkdown(page));
-  if (kit.screenshot) {
-    const b64 = kit.screenshot.split(',')[1];
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    zip.add(`${root}screenshot.png`, bytes);
+  if (kit.screenshots?.slices.length) {
+    onProgress('Stitching full-page screenshot…');
+    const shots = kit.screenshots;
+    zip.add(`${root}screenshot.png`, dataUrlBytes(shots.slices[0].dataUrl));
+    if (shots.slices.length > 1) {
+      try {
+        zip.add(`${root}screenshot-full.png`, await stitch(shots));
+      } catch {
+        /* canvas limits on enormous pages: keep the first slice only */
+      }
+    }
   }
   zip.add(`${root}data/design-tokens.json`, json(kit.designTokens));
   zip.add(`${root}data/sections.json`, json(kit.sections));

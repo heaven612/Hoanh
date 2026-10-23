@@ -12,7 +12,9 @@ function escapeText(text) {
     .replace(/</g, '&lt;');
 }
 
-const escapeLineStart = (line) => line.replace(/^(\s*)([#>+-]|\d+[.)])(\s)/, '$1\\$2$3');
+const escapeLineStart = (line) => line
+  .replace(/^(\s*)([#>+-])(\s)/, '$1\\$2$3')
+  .replace(/^(\s*)(\d+)([.)])(\s)/, '$1$2\\$3$4');
 
 function wrap(text, marker) {
   // Keep surrounding whitespace outside the emphasis markers.
@@ -53,7 +55,7 @@ function tableMarkdown(block) {
   const cell = (c) => (c ? inlineMarkdown(c.inlines, {}).replace(/\|/g, '\\|').replace(/\s*\n\s*/g, '<br>') : '');
   const row = (r) => `| ${Array.from({ length: width }, (_, i) => cell(r.cells[i])).join(' | ')} |`;
   const rows = [...block.rows];
-  const head = rows[0].header ? rows.shift() : { cells: Array.from({ length: width }, () => ({ inlines: [] })) };
+  const head = rows.shift(); // Markdown tables need a header row; use the first row
   const lines = [row(head), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`, ...rows.map(row)];
   if (block.caption) lines.unshift(`*Table: ${escapeText(block.caption)}*`, '');
   return lines.join('\n');

@@ -1153,6 +1153,25 @@
     }));
   }
 
+  // Serializes the DOM including open shadow roots (as declarative shadow DOM).
+  function serializeDocument() {
+    const root = document.documentElement;
+    if (typeof root.getHTML !== 'function') return root.outerHTML;
+    const shadowRoots = [];
+    const walk = (node) => {
+      node.querySelectorAll('*').forEach((el) => {
+        if (el.shadowRoot) {
+          shadowRoots.push(el.shadowRoot);
+          walk(el.shadowRoot);
+        }
+      });
+    };
+    walk(document);
+    if (!shadowRoots.length) return root.outerHTML;
+    const open = root.outerHTML.match(/^<html[^>]*>/i)?.[0] || '<html>';
+    return `${open}${root.getHTML({ shadowRoots })}</html>`;
+  }
+
   function extractSiteKit(options = {}) {
     const content = extractPage(options);
     const fonts = [];
@@ -1166,7 +1185,7 @@
       : '<!DOCTYPE html>';
     return {
       content,
-      html: `${doctype}\n${document.documentElement.outerHTML}`,
+      html: `${doctype}\n${serializeDocument()}`,
       baseUrl: document.baseURI,
       stylesheets: collectSheets(),
       scripts: [...document.scripts].map((s) => ({
@@ -1213,5 +1232,42 @@
     return true;
   }
 
-  window.__webCollector = { extractPage, extractSiteKit, autoScroll };
+  // --- Full-page screenshot helpers (driven step by step from the service worker)
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function screenshotPlan() {
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      total: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0),
+      dpr: window.devicePixelRatio || 1,
+    };
+  }
+
+  async function scrollToY(y) {
+    window.scrollTo({ top: y, left: 0, behavior: 'instant' });
+    await sleep(350);
+    return window.scrollY;
+  }
+
+  // Sticky/fixed headers would repeat in every slice; hide them after the first one.
+  function hideFixed(hide) {
+    if (hide) {
+      for (const el of document.querySelectorAll('body *')) {
+        const pos = getComputedStyle(el).position;
+        if (pos === 'fixed' || pos === 'sticky') {
+          el.setAttribute('data-wcc-vis', el.style.visibility || '');
+          el.style.visibility = 'hidden';
+        }
+      }
+    } else {
+      document.querySelectorAll('[data-wcc-vis]').forEach((el) => {
+        el.style.visibility = el.getAttribute('data-wcc-vis');
+        el.removeAttribute('data-wcc-vis');
+      });
+    }
+    return true;
+  }
+
+  window.__webCollector = { extractPage, extractSiteKit, autoScroll, screenshotPlan, scrollToY, hideFixed };
 })();
