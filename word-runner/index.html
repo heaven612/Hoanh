@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Word Runner</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --panel: #ffffff; --ink: #2b2b2b; --muted: #777;
+    --accent: #2a9d8f; --good: #2a9d8f; --bad: #e76f51; --warn: #e9c46a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center; padding: 16px;
+  }
+  h1 { margin: 4px 0 12px; font-size: 22px; letter-spacing: .5px; }
+  #wrap { width: 100%; max-width: 900px; }
+  #hud {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 12px; margin-bottom: 8px; flex-wrap: wrap;
+  }
+  #target {
+    font-size: 40px; font-weight: 800; padding: 6px 18px; border-radius: 10px;
+    background: var(--panel); border: 3px solid var(--ink); min-width: 200px; text-align: center;
+    transition: background .15s, border-color .15s;
+  }
+  #target.armed { background: #d8f3ee; border-color: var(--good); }
+  #target small { display: block; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 1px; }
+  .stat { font-size: 18px; font-weight: 700; }
+  .stat span { color: var(--accent); }
+  canvas {
+    display: block; width: 100%; height: auto; background: #fffdf8;
+    border: 2px solid var(--ink); border-radius: 8px;
+  }
+  #heardBox {
+    margin-top: 10px; background: var(--panel); border: 2px solid #ddd; border-radius: 8px;
+    padding: 10px 12px; min-height: 64px;
+  }
+  #heardBox .label { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 1px; }
+  #mic { float: right; font-size: 12px; font-weight: 700; }
+  #mic.on { color: var(--good); } #mic.off { color: var(--bad); }
+  #heard { font-size: 20px; margin-top: 4px; word-wrap: break-word; }
+  #heard .interim { color: var(--muted); font-style: italic; }
+  #heard mark { background: #b7ebe1; border-radius: 4px; padding: 0 3px; }
+  #overlay {
+    position: fixed; inset: 0; background: rgba(30,30,30,.55);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  #overlay.hidden { display: none; }
+  .card {
+    background: var(--panel); border-radius: 12px; padding: 22px 26px; max-width: 460px; width: 100%;
+    box-shadow: 0 10px 40px rgba(0,0,0,.3); text-align: center;
+  }
+  .card h2 { margin-top: 0; }
+  .card p { color: #444; line-height: 1.45; }
+  .card table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; text-align: left; }
+  .card th, .card td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+  .card th { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+  .card td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  button {
+    font: inherit; font-weight: 700; font-size: 18px; padding: 10px 22px; border-radius: 8px;
+    border: 0; background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button.link { background: none; color: var(--muted); font-size: 13px; font-weight: 500; text-decoration: underline; padding: 6px; }
+  .err { color: var(--bad); font-weight: 600; }
+</style>
+</head>
+<body>
+<!-- ===================================================================
+     EDIT YOUR WORDS HERE. One entry per target. Multi-word phrases work.
+     =================================================================== -->
+<script>
+const WORDS = [
+  "apple", "banana", "orange", "window", "garden",
+  "yellow", "purple", "teacher", "pencil", "rabbit",
+  "summer", "winter", "bottle", "doctor", "kitchen",
+  "monkey", "river", "candle", "button", "rocket"
+];
+
+// ---- Tunables ----
+const LIVES = 3;               // hits allowed per run
+const AUTO_TIME_JUMP = true;   // true: saying the word "arms" a perfectly-timed jump.
+                               // false: dino jumps the instant the word is recognised.
+const START_SPEED = 220;       // px/s
+const MAX_SPEED = 420;
+const SPEED_GAIN = 4;          // px/s added per obstacle cleared
+const SECONDS_BETWEEN = 3.2;   // time between obstacles (gives you time to speak)
+</script>
+
+<div id="wrap">
+  <h1>🦖 Word Runner</h1>
+  <div id="hud">
+    <div class="stat">Score: <span id="score">0</span></div>
+    <div id="target"><small>SAY</small><span id="targetWord">—</span></div>
+    <div class="stat">Lives: <span id="lives"></span></div>
+  </div>
+  <canvas id="game" width="900" height="260"></canvas>
+  <div id="heardBox">
+    <span id="mic" class="off">● mic off</span>
+    <div class="label">WHAT THE BROWSER HEARD</div>
+    <div id="heard"><span class="interim">…</span></div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="card" id="card"></div>
+</div>
+
+<script>
+(() => {
+  // ---------------------------------------------------------------- setup
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const GROUND = H - 40;
+
+  const $ = id => document.getElementById(id);
+  const ui = {
+    score: $("score"), lives: $("lives"), target: $("target"), targetWord: $("targetWord"),
+    heard: $("heard"), mic: $("mic"), overlay: $("overlay"), card: $("card"),
+  };
+
+  const STORE_KEY = "wordRunnerStats.v1";
+  const words = WORDS.map(w => normalize(w)).filter(Boolean);
+
+  // ------------------------------------------------------------ word stats
+  function loadStats() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
+  }
+  function saveStats() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(stats)); } catch {}
+  }
+  let stats = loadStats();             // { word: { misses, attempts } } all-time
+  let runMisses = {};                  // { word: misses } this run
+  function bump(word, field) {
+    stats[word] = stats[word] || { misses: 0, attempts: 0 };
+    stats[word][field]++;
+    saveStats();
+  }
+
+  // ------------------------------------------------------------ matching
+  function normalize(s) {
+    return s.toLowerCase().replace(/[^a-z0-9'\s-]/g, " ").replace(/-/g, " ")
+            .replace(/\s+/g, " ").trim();
+  }
+  function tokens(s) { const n = normalize(s); return n ? n.split(" ") : []; }
+  // True if `target` (one or more words) appears as whole word(s) in token list.
+  function containsWord(toks, target) {
+    const t = target.split(" ");
+    for (let i = 0; i + t.length <= toks.length; i++) {
+      let ok = true;
+      for (let j = 0; j < t.length; j++) if (toks[i + j] !== t[j]) { ok = false; break; }
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------ game state
+  let state = "menu";   // menu | playing | over
+  let score, lives, speed, obstacles, spawnTimer, groundOffset, clouds, flash, lastWord;
+  const dino = { x: 90, y: GROUND, w: 44, h: 50, vy: 0, onGround: true, armed: false, legT: 0, hurtT: 0 };
+  const GRAVITY = 2000, JUMP_V = -720;
+
+  function resetGame() {
+    score = 0; lives = LIVES; speed = START_SPEED;
+    obstacles = []; spawnTimer = 0.6; groundOffset = 0; flash = 0; lastWord = null;
+    runMisses = {};
+    dino.y = GROUND; dino.vy = 0; dino.onGround = true; dino.armed = false; dino.hurtT = 0;
+    clouds = Array.from({ length: 4 }, (_, i) => ({ x: i * 240 + Math.random() * 100, y: 30 + Math.random() * 60 }));
+    updateHud();
+  }
+
+  function pickWord() {
+    if (!words.length) return "add words";
+    let w;
+    do { w = words[Math.floor(Math.random() * words.length)]; }
+    while (words.length > 1 && w === lastWord);
+    lastWord = w;
+    return w;
+  }
+
+  function spawnObstacle() {
+    const kind = Math.random() < 0.5 ? "rock" : "crate";
+    const w = kind === "rock" ? 34 + Math.random() * 14 : 30;
+    const h = kind === "rock" ? 26 + Math.random() * 10 : 30 + Math.random() * 14;
+    obstacles.push({ x: W + 20, w, h, kind, word: pickWord(), resolved: false, hit: false });
+  }
+
+  // The current target = first obstacle the dino hasn't dealt with yet.
+  function currentObstacle() { return obstacles.find(o => !o.resolved) || null; }
+
+  let shownWord = null;
+  function updateTarget() {
+    const o = currentObstacle();
+    const w = o ? o.word : null;
+    if (w !== shownWord || (o && o !== shownObstacle)) {
+      shownWord = w; shownObstacle = o;
+      ui.targetWord.textContent = w || "—";
+      dino.armed = false;
+      speech.markStale();           // anything heard before now does not count
+    }
+    ui.target.classList.toggle("armed", dino.armed);
+  }
+  let shownObstacle = null;
+
+  function onWordSpoken() {
+    const o = currentObstacle();
+    if (!o || state !== "playing") return false;
+    if (AUTO_TIME_JUMP) {
+      dino.armed = true;
+    } else {
+      jump();
+    }
+    ui.target.classList.add("armed");
+    return true;
+  }
+
+  function jump() {
+    if (!dino.onGround) return;
+    dino.vy = JUMP_V; dino.onGround = false; dino.armed = false;
+  }
+
+  function updateHud() {
+    ui.score.textContent = score;
+    ui.lives.textContent = "❤".repeat(Math.max(0, lives)) + "♡".repeat(Math.max(0, LIVES - lives));
+  }
+
+  // ------------------------------------------------------------ main loop
+  let lastT = performance.now();
+  function frame(t) {
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+    if (state === "playing") update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function update(dt) {
+    // spawn
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnObstacle();
+      spawnTimer = SECONDS_BETWEEN * (0.85 + Math.random() * 0.3);
+    }
+
+    // move world
+    groundOffset = (groundOffset + speed * dt) % 40;
+    for (const c of clouds) { c.x -= speed * 0.2 * dt; if (c.x < -80) { c.x = W + Math.random() * 120; c.y = 30 + Math.random() * 60; } }
+    for (const o of obstacles) o.x -= speed * dt;
+
+    // auto-timed jump: fire when the obstacle is close enough to clear it
+    const cur = currentObstacle();
+    if (dino.armed && cur && dino.onGround) {
+      const gap = cur.x - (dino.x + dino.w);
+      const airtime = 2 * -JUMP_V / GRAVITY;
+      // jump so the dino's apex is roughly over the obstacle's centre
+      const lead = speed * (airtime / 2) - cur.w / 2 - dino.w / 2;
+      if (gap <= lead) jump();
+    }
+
+    // dino physics
+    if (!dino.onGround) {
+      dino.vy += GRAVITY * dt;
+      dino.y += dino.vy * dt;
+      if (dino.y >= GROUND) { dino.y = GROUND; dino.vy = 0; dino.onGround = true; }
+    }
+    dino.legT += dt * speed / 25;
+    if (dino.hurtT > 0) dino.hurtT -= dt;
+    if (flash > 0) flash -= dt;
+
+    // collisions & clearing
+    for (const o of obstacles) {
+      if (o.resolved) continue;
+      const pad = 6;
+      const dx1 = dino.x + pad, dx2 = dino.x + dino.w - pad;
+      const dyBottom = dino.y - 2;
+      const overlapX = dx2 > o.x && dx1 < o.x + o.w;
+      if (overlapX && dyBottom > GROUND - o.h) {
+        o.resolved = true; o.hit = true;
+        lives--; flash = 0.25; dino.hurtT = 0.6;
+        bump(o.word, "attempts"); bump(o.word, "misses");
+        runMisses[o.word] = (runMisses[o.word] || 0) + 1;
+        updateHud();
+        if (lives <= 0) { gameOver(); return; }
+      } else if (o.x + o.w < dino.x) {
+        o.resolved = true;
+        score++; bump(o.word, "attempts");
+        speed = Math.min(MAX_SPEED, speed + SPEED_GAIN);
+        updateHud();
+      }
+    }
+    obstacles = obstacles.filter(o => o.x + o.w > -40);
+    updateTarget();
+  }
+
+  // ------------------------------------------------------------ drawing
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // sky tint flash on hit
+    if (flash > 0) { ctx.fillStyle = `rgba(231,111,81,${flash})`; ctx.fillRect(0, 0, W, H); }
+
+    // clouds
+    ctx.fillStyle = "#e6e2d8";
+    for (const c of (clouds || [])) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 14, 0, Math.PI * 2);
+      ctx.arc(c.x + 18, c.y - 6, 18, 0, Math.PI * 2);
+      ctx.arc(c.x + 38, c.y, 13, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ground
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, GROUND + 1); ctx.lineTo(W, GROUND + 1); ctx.stroke();
+    ctx.fillStyle = "#b9b2a3";
+    for (let x = -groundOffset; x < W; x += 40) {
+      ctx.fillRect(x + 6, GROUND + 10, 10, 2);
+      ctx.fillRect(x + 26, GROUND + 22, 6, 2);
+    }
+
+    // obstacles
+    for (const o of (obstacles || [])) drawObstacle(o);
+
+    drawDino();
+  }
+
+  function drawObstacle(o) {
+    const top = GROUND - o.h;
+    if (o.kind === "rock") {
+      ctx.fillStyle = o.hit ? "#c9a49a" : "#8d8a83";
+      ctx.beginPath();
+      ctx.moveTo(o.x, GROUND);
+      ctx.lineTo(o.x + o.w * 0.12, top + o.h * 0.35);
+      ctx.lineTo(o.x + o.w * 0.45, top);
+      ctx.lineTo(o.x + o.w * 0.85, top + o.h * 0.2);
+      ctx.lineTo(o.x + o.w, GROUND);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.25)";
+      ctx.fillRect(o.x + o.w * 0.35, top + 6, 6, 4);
+    } else {
+      ctx.fillStyle = o.hit ? "#d9b3a0" : "#c58b4c";
+      ctx.fillRect(o.x, top, o.w, o.h);
+      ctx.strokeStyle = "#7a5228"; ctx.lineWidth = 2;
+      ctx.strokeRect(o.x + 1, top + 1, o.w - 2, o.h - 2);
+      ctx.beginPath(); ctx.moveTo(o.x + 2, top + 2); ctx.lineTo(o.x + o.w - 2, GROUND - 2); ctx.stroke();
+    }
+    // word label floating above the obstacle
+    if (!o.resolved) {
+      const isCur = o === currentObstacle();
+      ctx.font = `${isCur ? "bold " : ""}14px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillStyle = isCur ? (dino.armed ? "#2a9d8f" : "#2b2b2b") : "#aaa";
+      ctx.fillText(o.word, o.x + o.w / 2, top - 10);
+    }
+  }
+
+  // Original dino: chunky rounded teal body, big eye, spikes on the back, stubby arms.
+  function drawDino() {
+    const x = dino.x, y = dino.y; // y = feet line
+    if (dino.hurtT > 0 && Math.floor(dino.hurtT * 20) % 2 === 0) return; // blink when hurt
+    const body = "#2a9d8f", belly = "#a8e6cf", dark = "#1d6b62";
+
+    // tail
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y - 30); ctx.quadraticCurveTo(x - 18, y - 26, x - 14, y - 14);
+    ctx.quadraticCurveTo(x - 2, y - 18, x + 10, y - 16); ctx.closePath(); ctx.fill();
+
+    // back spikes
+    ctx.fillStyle = "#f4a261";
+    for (let i = 0; i < 3; i++) {
+      const sx = x + 6 + i * 9;
+      ctx.beginPath(); ctx.moveTo(sx, y - 40 + i * -2); ctx.lineTo(sx + 5, y - 50 - i * 2); ctx.lineTo(sx + 10, y - 40 - i * 2); ctx.fill();
+    }
+
+    // body (rounded)
+    ctx.fillStyle = body;
+    roundRect(x, y - 44, 34, 32, 12); ctx.fill();
+    // head
+    roundRect(x + 20, y - 54, 26, 22, 9); ctx.fill();
+    // belly
+    ctx.fillStyle = belly;
+    roundRect(x + 14, y - 30, 16, 16, 7); ctx.fill();
+    // eye
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x + 36, y - 46, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(x + 37.5, y - 46, 2.5, 0, Math.PI * 2); ctx.fill();
+    // nostril + smile
+    ctx.fillStyle = dark; ctx.fillRect(x + 42, y - 44, 2, 2);
+    ctx.strokeStyle = dark; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x + 39, y - 39, 4, 0.2, Math.PI * 0.7); ctx.stroke();
+    // arm
+    ctx.fillStyle = dark; roundRect(x + 28, y - 30, 8, 4, 2); ctx.fill();
+    // legs (animated when running)
+    const phase = dino.onGround ? Math.sin(dino.legT) : 0;
+    ctx.fillStyle = dark;
+    roundRect(x + 8, y - 14, 8, 14 - Math.max(0, phase) * 5, 3); ctx.fill();
+    roundRect(x + 22, y - 14, 8, 14 - Math.max(0, -phase) * 5, 3); ctx.fill();
+
+    // "armed" sparkle
+    if (dino.armed) {
+      ctx.fillStyle = "#e9c46a";
+      ctx.font = "bold 16px system-ui"; ctx.textAlign = "center";
+      ctx.fillText("✓", x + 22, y - 62);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  // ------------------------------------------------------------ speech
+  const speech = (() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec = null, wanted = false, running = false;
+    // For each result index in the current session: number of leading words to ignore
+    // (Infinity = whole result already used / stale).
+    let ignore = {};
+    let latest = {}; // index -> {text, isFinal}
+
+    function render(matchIdx) {
+      const idxs = Object.keys(latest).map(Number).sort((a, b) => a - b).slice(-3);
+      if (!idxs.length) { ui.heard.innerHTML = '<span class="interim">…</span>'; return; }
+      const target = shownWord;
+      ui.heard.innerHTML = idxs.map(i => {
+        const r = latest[i];
+        let html = escapeHtml(r.text.trim());
+        if (target && i === matchIdx) {
+          const re = new RegExp("\\b(" + target.split(" ").map(escapeRe).join("[\\s-]+") + ")\\b", "i");
+          html = html.replace(re, "<mark>$1</mark>");
+        }
+        return r.isFinal ? html : `<span class="interim">${html}</span>`;
+      }).join(" · ");
+    }
+
+    function handleResult(e) {
+      let matched = -1;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const text = e.results[i][0].transcript;
+        latest[i] = { text, isFinal: e.results[i].isFinal };
+        if (matched === -1) matched = checkText(i, text);
+      }
+      // keep only a handful of recent results for display
+      const keys = Object.keys(latest).map(Number).sort((a, b) => a - b);
+      while (keys.length > 6) delete latest[keys.shift()];
+      render(matched);
+    }
+
+    // Returns i if the target was matched in this result, else -1.
+    function checkText(i, text) {
+      if (state !== "playing" || !shownWord) return -1;
+      const skip = ignore[i] || 0;
+      if (skip === Infinity) return -1;
+      const toks = tokens(text).slice(skip);
+      if (containsWord(toks, shownWord)) {
+        if (onWordSpoken()) { ignore[i] = Infinity; return i; }
+      }
+      return -1;
+    }
+
+    function start() {
+      if (!SR) return false;
+      wanted = true;
+      if (running) return true;
+      rec = new SR();
+      rec.lang = "en-US";
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.maxAlternatives = 1;
+      rec.onstart = () => { running = true; ignore = {}; latest = {}; setMic(true); };
+      rec.onresult = handleResult;
+      rec.onerror = ev => {
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+          wanted = false; setMic(false, "mic blocked");
+          showMicError();
+        } else if (ev.error !== "no-speech" && ev.error !== "aborted") {
+          setMic(false, ev.error);
+        }
+      };
+      rec.onend = () => {
+        running = false; setMic(false);
+        if (wanted) setTimeout(() => { if (wanted && !running) { try { rec.start(); } catch {} } }, 150);
+      };
+      try { rec.start(); } catch {}
+      return true;
+    }
+
+    function stop() { wanted = false; try { rec && rec.stop(); } catch {} }
+
+    // Called whenever a new target word appears: everything heard so far is stale.
+    function markStale() {
+      for (const k of Object.keys(latest)) {
+        const r = latest[k];
+        ignore[k] = r.isFinal ? Infinity : tokens(r.text).length;
+      }
+      render(-1);
+    }
+
+    function setMic(on, msg) {
+      ui.mic.className = on ? "on" : "off";
+      ui.mic.textContent = on ? "● listening" : "● " + (msg || "mic off");
+    }
+
+    // Test hook: simulate the browser hearing `text` (as a final result).
+    window.__wordRunnerHear = text => {
+      const i = 1e6 + Object.keys(latest).length;
+      latest[i] = { text, isFinal: true };
+      const m = checkText(i, text); render(m); return m !== -1;
+    };
+
+    return { supported: !!SR, start, stop, markStale };
+  })();
+
+  // ------------------------------------------------------------ screens
+  function showMenu() {
+    state = "menu";
+    ui.overlay.classList.remove("hidden");
+    const support = speech.supported ? "" :
+      `<p class="err">This browser has no Web Speech API. Use desktop Google Chrome.</p>`;
+    const insecure = window.isSecureContext ? "" :
+      `<p class="err">Not a secure context — open via http://localhost (see instructions) so the mic works.</p>`;
+    ui.card.innerHTML = `
+      <h2>🦖 Word Runner</h2>
+      <p>Each obstacle carries a word. <b>Say the word out loud</b> and your dino will jump it.
+      ${AUTO_TIME_JUMP ? "Saying it early is fine — the dino arms (✓) and jumps at the right moment." : ""}</p>
+      <p>You have ${LIVES} lives. Score = obstacles cleared.</p>
+      ${support}${insecure}
+      <button id="startBtn">Start (allow microphone)</button>`;
+    $("startBtn").onclick = startGame;
+  }
+
+  function startGame() {
+    resetGame();
+    shownWord = null; shownObstacle = null;
+    ui.overlay.classList.add("hidden");
+    speech.start();
+    state = "playing";
+    updateTarget();
+  }
+
+  function gameOver() {
+    state = "over";
+    speech.stop();
+    const worst = Object.entries(stats)
+      .filter(([w, s]) => s.misses > 0 && words.includes(w))
+      .sort((a, b) => b[1].misses - a[1].misses || (b[1].misses / b[1].attempts) - (a[1].misses / a[1].attempts))
+      .slice(0, 5);
+    const rows = worst.length
+      ? worst.map(([w, s]) => `<tr><td><b>${escapeHtml(w)}</b></td>
+          <td class="num">${runMisses[w] || 0}</td>
+          <td class="num">${s.misses}</td>
+          <td class="num">${Math.round(100 * s.misses / Math.max(1, s.attempts))}%</td></tr>`).join("")
+      : `<tr><td colspan="4">No misses yet 🎉</td></tr>`;
+    ui.overlay.classList.remove("hidden");
+    ui.card.innerHTML = `
+      <h2>Game over</h2>
+      <p style="font-size:22px">Score: <b>${score}</b></p>
+      <h3 style="margin-bottom:0">5 worst words</h3>
+      <table>
+        <tr><th>Word</th><th class="num">This run</th><th class="num">All-time misses</th><th class="num">Miss rate</th></tr>
+        ${rows}
+      </table>
+      <button id="againBtn">Play again</button><br>
+      <button class="link" id="resetBtn">Reset word stats</button>`;
+    $("againBtn").onclick = startGame;
+    $("resetBtn").onclick = () => { stats = {}; saveStats(); gameOver(); };
+  }
+
+  function showMicError() {
+    state = "over";
+    ui.overlay.classList.remove("hidden");
+    ui.card.innerHTML = `
+      <h2>Microphone blocked</h2>
+      <p>Chrome didn't allow the microphone. Click the 🔒/camera icon in the address bar,
+      set Microphone to <b>Allow</b>, then reload. The page must be served from
+      <b>http://localhost</b> (not opened as a file).</p>
+      <button onclick="location.reload()">Reload</button>`;
+  }
+
+  // ------------------------------------------------------------ utils
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  resetGame();
+  showMenu();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
