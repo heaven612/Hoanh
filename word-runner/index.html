@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Word Runner</title>
+<script>
+/* ====================================================================
+   EDIT YOUR WORDS HERE. Lowercase, one entry per word (short phrases
+   like "ice cream" also work). Avoid words the recogniser writes as
+   digits or symbols ("two" -> "2").
+   ==================================================================== */
+const WORDS = [
+  "apple", "river", "yellow", "window", "thirty",
+  "world", "girl", "three", "water", "little",
+  "comfortable", "vegetable", "usually", "clothes", "village",
+  "question", "schedule", "purple", "breakfast", "mountain"
+];
+
+/* Tuning */
+const LIVES       = 3;    // hits allowed before game over
+const START_SPEED = 200;  // px per second (about 4 s to say the first word)
+const MAX_SPEED   = 340;
+const SPEED_STEP  = 6;    // speed gained per obstacle cleared
+</script>
+<style>
+  :root {
+    --bg: #f4f1ea; --panel: #ffffff; --ink: #22303a; --muted: #6b7a85;
+    --line: #d9d4c7; --accent: #2a9d8f; --good: #1f8a5b; --bad: #c8453a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151b20; --panel: #1e262d; --ink: #e8eef2; --muted: #93a3ae;
+      --line: #33404a; --accent: #4fc3b3; --good: #5fd39a; --bad: #f0786c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 12px; letter-spacing: .02em; }
+  .top { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 16px; flex: 1 1 260px; min-width: 0;
+  }
+  .label {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); display: flex; align-items: center; gap: 8px;
+  }
+  #target {
+    font-size: clamp(32px, 7vw, 54px); font-weight: 700; line-height: 1.15;
+    overflow-wrap: anywhere; min-height: 1.15em;
+  }
+  #target.ok { color: var(--good); }
+  #target.miss { color: var(--bad); }
+  #heard {
+    font-size: 20px; min-height: 56px; margin-top: 4px;
+    overflow-wrap: anywhere;
+  }
+  #heard .interim { color: var(--muted); font-style: italic; }
+  #heard .placeholder { color: var(--muted); font-size: 16px; }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--muted);
+    display: inline-block;
+  }
+  .dot.on { background: var(--bad); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .stage {
+    position: relative; border: 1px solid var(--line); border-radius: 12px;
+    overflow: hidden; background: #dff1f5;
+  }
+  canvas { display: block; width: 100%; height: auto; }
+  .overlay {
+    position: fixed; inset: 0; z-index: 10; display: flex; align-items: center;
+    justify-content: center; padding: 16px; background: rgba(15, 22, 28, .62);
+    overflow: auto;
+  }
+  .overlay[hidden] { display: none; }
+  .box {
+    background: var(--panel); color: var(--ink); border-radius: 12px;
+    padding: 18px 22px; max-width: 460px; width: 100%; text-align: center;
+    max-height: 100%; overflow: auto;
+  }
+  .box h2 { margin: 0 0 6px; font-size: 22px; }
+  .box p { margin: 6px 0; color: var(--muted); }
+  .box .big { font-size: 18px; color: var(--ink); }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border-radius: 10px;
+    border: 1px solid transparent; padding: 10px 20px; margin: 8px 4px 0;
+    background: var(--accent); color: #fff;
+  }
+  button.ghost {
+    background: transparent; color: var(--muted); border-color: var(--line);
+    font-weight: 500;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  td:first-child { font-weight: 600; }
+  .note { font-size: 14px; color: var(--muted); margin: 10px 2px 0; }
+  .warn { color: var(--bad); font-size: 14px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Word Runner</h1>
+
+  <div class="top">
+    <div class="card">
+      <div class="label">Say this word</div>
+      <div id="target">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label"><span class="dot" id="micDot"></span><span id="micText">Mic off</span></div>
+      <div id="heard"><span class="placeholder">What the browser hears will appear here.</span></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <canvas id="game" width="900" height="300"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="box" id="box"></div>
+    </div>
+  </div>
+
+  <p class="note">
+    The dino jumps only when the browser hears the word above. Say it before the
+    obstacle arrives. Needs Chrome (or Edge) and a microphone, served from
+    <code>http://localhost</code>.
+  </p>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('game'), ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, GROUND = 250;
+  const DINO_X = 110, GRAVITY = 2000, JUMP_V = -640;
+  const STORE_KEY = 'wordRunner.misses';
+  const DEBUG = new URLSearchParams(location.search).has('debug');
+
+  const targetEl = $('target'), heardEl = $('heard');
+  const micDot = $('micDot'), micText = $('micText');
+  const overlay = $('overlay'), box = $('box');
+
+  /* ---------------- persistent miss counts ---------------- */
+  function loadMisses() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMisses() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(allMisses)); } catch (e) {}
+  }
+  let allMisses = loadMisses();
+
+  /* ---------------- game state ---------------- */
+  const g = {
+    state: 'idle',          // idle | playing | over
+    score: 0, lives: LIVES, speed: START_SPEED,
+    target: '', armed: false, bag: [],
+    obstacle: null, runMisses: {},
+    dinoY: 0, dinoVy: 0, hurt: 0, phase: 0, scroll: 0, last: 0
+  };
+
+  function nextWord() {
+    if (!g.bag.length) {
+      g.bag = WORDS.slice().sort(() => Math.random() - 0.5);
+      // avoid the same word twice in a row across reshuffles
+      if (g.bag.length > 1 && g.bag[g.bag.length - 1] === g.target) g.bag.reverse();
+    }
+    g.target = g.bag.pop();
+    g.armed = false;
+    targetEl.textContent = g.target;
+    targetEl.className = '';
+    markTranscript();
+    const kind = ['rock', 'crystal', 'stump'][Math.floor(Math.random() * 3)];
+    const size = { rock: [44, 34], crystal: [36, 48], stump: [34, 42] }[kind];
+    g.obstacle = { x: W + 60, w: size[0], h: size[1], kind, word: g.target };
+  }
+
+  function startRun() {
+    Object.assign(g, {
+      state: 'playing', score: 0, lives: LIVES, speed: START_SPEED,
+      bag: [], runMisses: {}, dinoY: 0, dinoVy: 0, hurt: 0, target: ''
+    });
+    overlay.hidden = true;
+    nextWord();
+  }
+
+  function onHeardTarget() {
+    if (g.state !== 'playing' || g.armed) return;
+    g.armed = true;
+    targetEl.textContent = '✓ ' + g.target;
+    targetEl.className = 'ok';
+  }
+
+  function onHit() {
+    const w = g.target;
+    g.runMisses[w] = (g.runMisses[w] || 0) + 1;
+    allMisses[w] = (allMisses[w] || 0) + 1;
+    saveMisses();
+    g.lives--;
+    g.hurt = 0.6;
+    g.bag.unshift(w);               // missed words come back later this run
+    if (g.lives <= 0) { gameOver(); return; }
+    nextWord();
+  }
+
+  function gameOver() {
+    g.state = 'over';
+    g.obstacle = null;
+    targetEl.textContent = g.target;
+    targetEl.className = 'miss';
+    stopListening();
+    showGameOver();
+  }
+
+  /* ---------------- overlays ---------------- */
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function worstWords() {
+    return WORDS
+      .map(w => ({ w, all: allMisses[w] || 0, run: g.runMisses[w] || 0 }))
+      .filter(r => r.all > 0)
+      .sort((a, b) => b.all - a.all || b.run - a.run)
+      .slice(0, 5);
+  }
+
+  function showStart(message) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let html = '<h2>Word Runner</h2>';
+    if (!SR) {
+      html += '<p class="warn">This browser has no speech recognition. Open this page in Chrome or Edge on a computer.</p>';
+    } else {
+      html += '<p>A word appears. Say it out loud and the dino jumps the obstacle. ' +
+              'Miss ' + LIVES + ' words and the run ends.</p>';
+      if (location.protocol === 'file:') {
+        html += '<p class="warn">You opened this as a file. Chrome will keep asking for the ' +
+                'microphone. Serve it from http://localhost instead.</p>';
+      }
+      if (message) html += '<p class="warn">' + esc(message) + '</p>';
+      html += '<button id="startBtn">Start (allow the microphone)</button>';
+    }
+    box.innerHTML = html;
+    overlay.hidden = false;
+    const b = $('startBtn');
+    if (b) b.onclick = startListening;
+  }
+
+  function showGameOver() {
+    const rows = worstWords();
+    let html = '<h2>Game over</h2><p class="big">Obstacles cleared: <strong>' + g.score + '</strong></p>';
+    if (rows.length) {
+      html += '<table><tr><th>Worst words</th><th>This run</th><th>All time</th></tr>' +
+        rows.map(r => '<tr><td>' + esc(r.w) + '</td><td>' + r.run + '</td><td>' + r.all + '</td></tr>').join('') +
+        '</table>';
+    } else {
+      html += '<p>No misses recorded.</p>';
+    }
+    html += '<button id="againBtn">Play again</button>' +
+            '<button id="resetBtn" class="ghost">Reset miss history</button>';
+    box.innerHTML = html;
+    overlay.hidden = false;
+    $('againBtn').onclick = startListening;
+    $('resetBtn').onclick = () => { allMisses = {}; saveMisses(); g.runMisses = {}; showGameOver(); };
+  }
+
+  /* ---------------- speech recognition ---------------- */
+  let rec = null, wantListening = false, lastResults = null;
+  let mark = { index: 0, words: 0 };   // speech before this point belongs to an earlier word
+
+  const normalize = s => ' ' + String(s).toLowerCase().replace(/[‘’]/g, "'")
+    .replace(/[^a-z0-9']+/g, ' ').trim() + ' ';
+  const wordCount = s => { const t = s.trim(); return t ? t.split(/\s+/).length : 0; };
+
+  function markTranscript() {
+    if (!lastResults || !lastResults.length) { mark = { index: 0, words: 0 }; return; }
+    const i = lastResults.length - 1, last = lastResults[i];
+    mark = last.isFinal ? { index: i + 1, words: 0 }
+                        : { index: i, words: wordCount(last[0].transcript) };
+  }
+
+  function setMic(on, text) {
+    micDot.classList.toggle('on', on);
+    micText.textContent = text;
+  }
+
+  function showHeard(finalText, interimText) {
+    const tail = s => s.length > 90 ? '…' + s.slice(-90) : s;
+    heardEl.textContent = '';
+    const total = (finalText + ' ' + interimText).trim();
+    if (!total) return;
+    const room = 90 - interimText.length;
+    const keepFinal = room > 0 ? finalText.slice(-room) : '';
+    if (keepFinal) heardEl.append(document.createTextNode(keepFinal + ' '));
+    if (interimText) {
+      const sp = document.createElement('span');
+      sp.className = 'interim';
+      sp.textContent = tail(interimText);
+      heardEl.append(sp);
+    }
+  }
+
+  function buildRecognizer() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const r = new SR();
+    r.lang = 'en-US';
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onstart = () => {
+      lastResults = null;
+      mark = { index: 0, words: 0 };
+      setMic(true, 'Listening');
+      if (g.state !== 'playing') startRun();
+    };
+
+    r.onresult = e => {
+      lastResults = e.results;
+      let finalText = '', interimText = '', fresh = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t + ' '; else interimText += t;
+        if (i === mark.index) fresh += ' ' + t.trim().split(/\s+/).slice(mark.words).join(' ');
+        else if (i > mark.index) fresh += ' ' + t;
+      }
+      showHeard(finalText.trim(), interimText.trim());
+      if (g.state === 'playing' && !g.armed && normalize(fresh).includes(normalize(g.target))) {
+        onHeardTarget();
+      }
+    };
+
+    r.onerror = e => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;   // onend restarts
+      const msg = {
+        'not-allowed': 'Microphone permission was blocked. Allow it from the icon in the address bar, then press Start.',
+        'service-not-allowed': 'Speech recognition is not allowed on this page. Use Chrome on http://localhost.',
+        'audio-capture': 'No microphone was found.',
+        'network': 'Speech recognition needs an internet connection (Chrome sends audio to its speech service).'
+      }[e.error] || ('Speech recognition error: ' + e.error);
+      wantListening = false;
+      if (g.state === 'playing') { g.state = 'idle'; g.obstacle = null; targetEl.innerHTML = '&nbsp;'; }
+      showStart(msg);
+    };
+
+    r.onend = () => {
+      if (wantListening) {
+        setMic(false, 'Reconnecting mic…');
+        setTimeout(() => { if (wantListening) { try { r.start(); } catch (err) {} } }, 200);
+      } else {
+        setMic(false, 'Mic off');
+      }
+    };
+    return r;
+  }
+
+  function startListening() {
+    if (!rec) rec = buildRecognizer();
+    wantListening = true;
+    g.state = 'idle';
+    box.innerHTML = '<h2>Waiting for the microphone…</h2><p>Click "Allow" if Chrome asks.</p>';
+    try { rec.start(); }
+    catch (err) { rec.onstart(); }   // already running: go straight to the run
+  }
+
+  function stopListening() {
+    wantListening = false;
+    if (rec) { try { rec.stop(); } catch (err) {} }
+  }
+
+  /* ---------------- update ---------------- */
+  function update(dt) {
+    g.hurt = Math.max(0, g.hurt - dt);
+    let worldSpeed = 60;                         // idle drift
+    if (g.state === 'playing') {
+      const o = g.obstacle;
+      const dinoMid = DINO_X + 32;
+      const dist = (o.x + o.w / 2) - dinoMid;    // centre to centre
+      const jumpDist = g.speed * (-JUMP_V / GRAVITY);
+      // once the word is heard, sprint to the obstacle instead of waiting
+      worldSpeed = (g.armed && dist > jumpDist + 20) ? g.speed * 3 : g.speed;
+
+      o.x -= worldSpeed * dt;
+
+      if (g.armed && g.dinoY === 0 && g.dinoVy === 0 && dist <= jumpDist && dist > -o.w) {
+        g.dinoVy = JUMP_V;
+      }
+      if (!g.armed && o.x < DINO_X + 54 && o.x + o.w > DINO_X + 12) {
+        onHit();
+      } else if (o.x + o.w < DINO_X) {
+        g.score++;
+        g.speed = Math.min(MAX_SPEED, g.speed + SPEED_STEP);
+        nextWord();
+      }
+    }
+    // jump physics
+    if (g.dinoVy !== 0 || g.dinoY < 0) {
+      g.dinoVy += GRAVITY * dt;
+      g.dinoY += g.dinoVy * dt;
+      if (g.dinoY >= 0) { g.dinoY = 0; g.dinoVy = 0; }
+    }
+    if (g.state !== 'over') {
+      g.scroll += worldSpeed * dt;
+      g.phase += worldSpeed * dt * 0.06;
+    }
+  }
+
+  /* ---------------- drawing ---------------- */
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
+
+  function drawBackground() {
+    const sky = ctx.createLinearGradient(0, 0, 0, GROUND);
+    sky.addColorStop(0, '#cfe9f3'); sky.addColorStop(1, '#f3f7ea');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, GROUND);
+
+    // sun
+    ctx.fillStyle = '#f6d77a';
+    ctx.beginPath(); ctx.arc(780, 60, 26, 0, Math.PI * 2); ctx.fill();
+
+    // far hills
+    ctx.fillStyle = '#b9d8b0';
+    for (let i = -1; i < 5; i++) {
+      const x = i * 260 - (g.scroll * 0.15) % 260;
+      ctx.beginPath(); ctx.ellipse(x + 130, GROUND, 170, 70, 0, Math.PI, 0); ctx.fill();
+    }
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    for (let i = 0; i < 4; i++) {
+      const x = ((i * 290 + 80 - g.scroll * 0.3) % (W + 160) + W + 160) % (W + 160) - 80;
+      const y = 40 + (i % 2) * 34;
+      rr(x, y, 70, 18, 9); rr(x + 16, y - 10, 36, 20, 10);
+    }
+    // ground
+    ctx.fillStyle = '#d9b97c'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#7fb069'; ctx.fillRect(0, GROUND, W, 6);
+    ctx.fillStyle = '#b89457';
+    for (let i = 0; i < 16; i++) {
+      const x = ((i * 64 - g.scroll) % (W + 64) + W + 64) % (W + 64) - 32;
+      rr(x, GROUND + 18 + (i % 3) * 9, 18 + (i % 4) * 5, 4, 2);
+    }
+  }
+
+  // Original character: a round teal dino with yellow back plates.
+  function drawDino() {
+    const air = g.dinoY < 0;
+    const hurt = g.hurt > 0 && Math.floor(g.hurt * 12) % 2 === 0;
+    const body = hurt ? '#e2675c' : '#2a9d8f';
+    const dark = hurt ? '#b9483f' : '#1f7a70';
+    const swing = air ? 5 : Math.sin(g.phase) * 7;
+    const bob = air ? 0 : Math.abs(Math.sin(g.phase)) * 2;
+
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,.15)';
+    const sh = 1 + g.dinoY / 220;
+    ctx.beginPath(); ctx.ellipse(DINO_X + 30, GROUND + 3, 26 * sh, 5 * sh, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.save();
+    ctx.translate(DINO_X, GROUND + g.dinoY - bob);
+
+    // far leg
+    ctx.fillStyle = dark;
+    rr(14 - swing, -18, 9, 18 + bob, 4);
+    // tail
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(10, -26); ctx.quadraticCurveTo(-18, -30, -24, -46 + swing * 0.4);
+    ctx.quadraticCurveTo(-6, -50, 12, -46); ctx.fill();
+    // back plates
+    ctx.fillStyle = '#e9c46a';
+    for (let i = 0; i < 3; i++) {
+      const px = 6 + i * 11, py = -50 - i * 3;
+      ctx.beginPath(); ctx.moveTo(px, py + 4); ctx.lineTo(px + 6, py - 9); ctx.lineTo(px + 12, py + 4); ctx.fill();
+    }
+    // body, neck, head
+    ctx.fillStyle = body;
+    rr(2, -52, 42, 36, 16);
+    rr(28, -66, 18, 26, 8);
+    rr(28, -84, 38, 26, 11);
+    // belly
+    ctx.fillStyle = '#c9ecd9';
+    rr(16, -36, 22, 16, 8);
+    // near leg and foot
+    ctx.fillStyle = body;
+    rr(26 + swing, -18, 10, 18 + bob, 4);
+    rr(26 + swing, -5 + bob, 15, 5, 2.5);
+    // arm
+    ctx.fillStyle = dark;
+    rr(38, -44, 12, 5, 2.5);
+    // eye
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(52, -74, 5.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1b2a33';
+    ctx.beginPath(); ctx.arc(53.5, -74, 2.4, 0, Math.PI * 2); ctx.fill();
+    // nostril and smile
+    ctx.fillRect(62, -78, 2, 2);
+    ctx.strokeStyle = '#1b2a33'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (hurt) { ctx.moveTo(52, -63); ctx.lineTo(63, -65); }
+    else { ctx.moveTo(52, -65); ctx.quadraticCurveTo(58, -61, 64, -65); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawObstacle(o) {
+    const x = o.x, y = GROUND;
+    if (o.kind === 'rock') {
+      ctx.fillStyle = '#8d99a6';
+      ctx.beginPath();
+      ctx.moveTo(x, y); ctx.lineTo(x + 5, y - o.h * 0.6); ctx.lineTo(x + o.w * 0.45, y - o.h);
+      ctx.lineTo(x + o.w * 0.85, y - o.h * 0.7); ctx.lineTo(x + o.w, y); ctx.fill();
+      ctx.fillStyle = '#a9b4bf';
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y - o.h * 0.58); ctx.lineTo(x + o.w * 0.45, y - o.h + 4);
+      ctx.lineTo(x + o.w * 0.5, y - o.h * 0.5); ctx.fill();
+    } else if (o.kind === 'crystal') {
+      ctx.fillStyle = '#8e6fd1';
+      ctx.beginPath(); ctx.moveTo(x + 4, y); ctx.lineTo(x + o.w * 0.5, y - o.h); ctx.lineTo(x + o.w - 6, y); ctx.fill();
+      ctx.fillStyle = '#b39ae6';
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 9, y - o.h * 0.55); ctx.lineTo(x + 18, y); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + o.w - 16, y); ctx.lineTo(x + o.w - 6, y - o.h * 0.65); ctx.lineTo(x + o.w, y); ctx.fill();
+    } else {
+      ctx.fillStyle = '#8a5a3c';
+      rr(x + 3, y - o.h + 6, o.w - 6, o.h - 6, 3);
+      ctx.fillStyle = '#c99a6b';
+      ctx.beginPath(); ctx.ellipse(x + o.w / 2, y - o.h + 6, o.w / 2 - 3, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#8a5a3c'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(x + o.w / 2, y - o.h + 6, o.w / 4 - 2, 2.5, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    // word tag above the obstacle
+    ctx.font = '600 16px system-ui, sans-serif';
+    const tw = ctx.measureText(o.word).width + 16;
+    const tx = Math.min(W - tw - 6, Math.max(6, x + o.w / 2 - tw / 2));
+    ctx.fillStyle = g.armed ? '#1f8a5b' : 'rgba(34,48,58,.85)';
+    rr(tx, y - o.h - 34, tw, 24, 8);
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.fillText(o.word, tx + 8, y - o.h - 21);
+  }
+
+  function drawHud() {
+    ctx.fillStyle = '#22303a';
+    ctx.font = '700 20px system-ui, sans-serif';
+    ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.fillText('Score ' + g.score, 16, 14);
+    for (let i = 0; i < LIVES; i++) {
+      const x = W - 28 - i * 26, y = 24;
+      ctx.fillStyle = i < g.lives ? '#d9534f' : 'rgba(34,48,58,.2)';
+      ctx.beginPath();
+      ctx.moveTo(x, y + 8);
+      ctx.bezierCurveTo(x - 14, y - 4, x - 6, y - 14, x, y - 5);
+      ctx.bezierCurveTo(x + 6, y - 14, x + 14, y - 4, x, y + 8);
+      ctx.fill();
+    }
+    if (DEBUG) {
+      ctx.fillStyle = '#22303a'; ctx.font = '12px system-ui, sans-serif';
+      ctx.fillText('debug: Space = pretend the word was heard', 16, 40);
+    }
+  }
+
+  function draw() {
+    drawBackground();
+    if (g.obstacle) drawObstacle(g.obstacle);
+    drawDino();
+    drawHud();
+  }
+
+  function frame(t) {
+    const dt = Math.min(0.05, (t - g.last) / 1000 || 0);
+    g.last = t;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------------- boot ---------------- */
+  if (DEBUG) {
+    addEventListener('keydown', e => {
+      if (e.code === 'Space') { e.preventDefault(); onHeardTarget(); }
+    });
+    window.__game = g;
+  }
+  showStart();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
